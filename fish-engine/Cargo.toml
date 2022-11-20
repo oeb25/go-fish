@@ -1,0 +1,12 @@
+[package]
+name = "fish-engine"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+getrandom = { version = "0.2.8", features = ["js"] }
+itertools = "0.10.5"
+log = "0.4.17"
+serde = { version = "1.0.147", features = ["derive"] }

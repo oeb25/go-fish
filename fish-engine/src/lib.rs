@@ -1,236 +1,81 @@
-use std::{
-    fmt::{Debug, Display},
-    ops::Range,
-};
-
-use itertools::Itertools;
 use log::info;
 use serde::Serialize;
 
-#[derive(Debug, Clone, Copy, Serialize)]
-pub struct Card(pub u64);
+pub mod cards;
+pub mod common_strat;
+pub mod random_strat;
+pub mod strategy;
+pub mod wiki_strat;
 
-impl Card {
-    pub fn all() -> impl Iterator<Item = Card> {
-        (0..52).map(Card)
+use cards::{Card, Cards, Ranks};
+use strategy::{
+    Announcement, Context, PlayerId, PublicPlayerInfo, Response, Strat, StratBuilder, Strategy,
+};
+use typeshare::typeshare;
+
+pub fn pick<T>(xs: &[T]) -> Option<&T> {
+    if xs.is_empty() {
+        return None;
     }
+    xs.get(fastrand::usize(0..xs.len()))
 
-    fn in_all_suits(self) -> Cards {
-        let base = self.0 % 13;
+    // let mut dest = [0; (usize::BITS / u8::BITS) as usize];
 
-        Cards::empty()
-            .add(Card(base + 13 * 0))
-            .add(Card(base + 13 * 1))
-            .add(Card(base + 13 * 2))
-            .add(Card(base + 13 * 3))
-    }
+    // getrandom::getrandom(&mut dest).expect("Failed to generate random number for pick");
+    // xs.get(usize::from_be_bytes(dest) % xs.len())
 }
 
-impl Display for Card {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let cards = "🂡🂢🂣🂤🂥🂦🂧🂨🂩🂪🂫🂬🂭🂮🂱🂲🂳🂴🂵🂶🂷🂸🂹🂺🂻🂼🂽🂾🃁🃂🃃🃄🃅🃆🃇🃈🃉🃊🃋🃌🃍🃎🃑🃒🃓🃔🃕🃖🃗🃘🃙🃚🃛🃜🃝🃞";
-
-        return write!(f, "{}", cards.chars().nth(self.0 as _).unwrap());
-
-        let face = self.0 % 13;
-        let suit = self.0 / 13;
-
-        let face = "A123456789JQK".chars().nth(face as _).unwrap();
-        let suit = "♣♥♦♠".chars().nth(suit as _).unwrap();
-
-        write!(f, "{suit}{face}")
-    }
+fn ranks_to_vec<S>(ranks: &Ranks, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    ranks.to_vec().serialize(serializer)
 }
 
-#[derive(Default, Clone, Copy)]
-pub struct Cards {
-    cards: u64,
-}
-
-impl Serialize for Cards {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        self.iter().collect_vec().serialize(serializer)
-    }
-}
-
-impl Cards {
-    pub fn empty() -> Self {
-        Cards { cards: 0 }
-    }
-    pub fn all() -> Self {
-        Cards {
-            cards: (1 << 53) - 1,
-        }
-    }
-    pub fn is_empty(self) -> bool {
-        self.cards == 0
-    }
-    pub fn add(self, c: Card) -> Self {
-        Cards {
-            cards: self.cards | (1 << c.0),
-        }
-    }
-    pub fn remove(self, c: Card) -> Self {
-        let mut cards = self.cards;
-        cards &= !(1 << c.0);
-
-        Cards { cards }
-    }
-    pub fn intersection(self, cs: Cards) -> Self {
-        Cards {
-            cards: self.cards & cs.cards,
-        }
-    }
-    pub fn has(self, c: Card) -> bool {
-        !self.intersection(Cards::empty().add(c)).is_empty()
-    }
-    pub fn num(self) -> u32 {
-        self.cards.count_ones() as _
-    }
-    pub fn choose_random(self) -> Option<Card> {
-        fn choose(r: Range<u64>) -> u64 {
-            let len = r.end - r.start;
-
-            let mut dest = [0; (u64::BITS / u8::BITS) as usize];
-
-            getrandom::getrandom(&mut dest);
-            r.start + (u64::from_be_bytes(dest) % len)
-        }
-
-        if self.is_empty() {
-            return None;
-        }
-
-        let i = choose(0..self.num() as u64);
-
-        self.iter().nth(i as _)
-    }
-    pub fn iter(&self) -> impl Iterator<Item = Card> + '_ {
-        (0..52).filter_map(|idx| {
-            if (1 << idx) & self.cards != 0 {
-                Some(Card(idx))
-            } else {
-                None
-            }
-        })
-    }
-}
-
-impl Debug for Cards {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.iter().format(","))
-    }
-}
-impl Display for Cards {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.iter().format(","))
-    }
-}
-
-fn pick<T>(xs: &[T]) -> &T {
-    let mut dest = [0; (usize::BITS / u8::BITS) as usize];
-
-    getrandom::getrandom(&mut dest);
-    &xs[(usize::from_be_bytes(dest) % xs.len())]
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct Action {
-    ask_who: PlayerId,
-    ask_for: Card,
-}
-
-#[derive(Debug, Clone, Copy, Serialize)]
-pub struct Announcement {
-    pub player_asking: PlayerId,
-    pub player_asked: PlayerId,
-    pub asked_for: Cards,
-    pub response: Response,
-}
-
-#[derive(Debug, Clone, Copy, Serialize)]
-#[serde(tag = "type")]
-pub enum Response {
-    GoFish,
-    TakeThese { count: u32 },
-}
-
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
-pub struct PlayerId(pub u32);
-
-pub struct Context {
-    players: Vec<PlayerId>,
-}
-
-pub trait Strategy: Debug {
-    fn deal_card(&mut self, ctx: &mut Context, card: Card);
-    fn action(&mut self, ctx: &mut Context) -> Option<Action>;
-    fn react(&mut self, ctx: &mut Context, res: Announcement);
-}
-
-#[derive(Debug, Default, Serialize)]
-pub struct Random {
-    hand: Cards,
-}
-
-impl Strategy for Random {
-    fn deal_card(&mut self, ctx: &mut Context, card: Card) {
-        self.hand = self.hand.add(card);
-    }
-
-    fn action(&mut self, ctx: &mut Context) -> Option<Action> {
-        let ask_who = *pick(&ctx.players);
-
-        Some(Action {
-            ask_who,
-            ask_for: self.hand.choose_random()?,
-        })
-    }
-
-    fn react(&mut self, ctx: &mut Context, res: Announcement) {}
-}
-
+#[typeshare]
 #[derive(Debug, Serialize)]
 pub struct Player {
-    hand: Cards,
-    pairs: Vec<Cards>,
+    pub hand: Cards,
+    #[serde(serialize_with = "ranks_to_vec")]
+    pub books: Ranks,
     #[serde(skip)]
-    strategy: Box<dyn Strategy>,
+    pub strategy: Strat,
 }
 
 impl Player {
-    pub fn new(strategy: Box<dyn Strategy>) -> Player {
+    pub fn new(strategy: Strat) -> Player {
         Player {
             hand: Cards::empty(),
-            pairs: vec![],
+            books: Ranks::empty(),
             strategy,
         }
     }
 
-    pub fn deal_card(&mut self, ctx: &mut Context, c: Card) {
+    pub fn deal_card(&mut self, ctx: &Context, c: Card) {
         self.strategy.deal_card(ctx, c);
         self.hand = self.hand.add(c);
     }
 
     pub fn take(&mut self, c: Card) {
-        self.hand = self.hand.remove(c);
+        self.hand = self.hand.remove(Cards::empty().add(c));
     }
 }
 
+#[typeshare]
 #[derive(Debug, Serialize)]
 pub struct Game {
     starting_cards: u32,
-    pool: Cards,
-    players: Vec<Player>,
+    pub pool: Cards,
+    pub players: Vec<Player>,
     pub announcements: Vec<Announcement>,
     pub stage: GameStage,
+    #[serde(skip)]
+    ctx: Context,
 }
 
-#[derive(Debug, Serialize)]
-#[serde(tag = "name")]
+#[typeshare]
+#[derive(Debug, Serialize, Clone, derive_more::IsVariant)]
+#[serde(tag = "name", content = "content")]
 pub enum GameStage {
     Dealing { who_next: PlayerId },
     Playing { who_next: PlayerId },
@@ -238,174 +83,222 @@ pub enum GameStage {
 }
 
 impl Game {
-    pub fn new(starting_cards: u32, mut players: Vec<Player>) -> Self {
-        info!("Starting with {starting_cards} cards!");
-
-        let mut pool = Cards::all();
-
-        let mut ctx = Context { players: vec![] };
-
-        info!("They are dealt! {players:?}");
+    pub fn new<const N: usize>(starting_cards: u32, players: [StratBuilder; N]) -> Self {
+        let num_players = players.len();
+        let ctx = Context::new(players.len());
 
         Game {
             starting_cards,
-            pool,
-            players,
+            pool: Cards::all(),
+            players: players
+                .into_iter()
+                .enumerate()
+                .map(|(pid, s)| Player::new(s.init(PlayerId(pid as _))))
+                .collect(),
             announcements: vec![],
             stage: GameStage::Dealing {
-                who_next: PlayerId(0),
+                who_next: PlayerId(fastrand::u32(0..num_players as u32)),
             },
+            ctx,
         }
     }
-    pub fn step(&mut self) {
-        let mut ctx = Context {
-            players: (0..self.players.len() as _).map(PlayerId).collect_vec(),
-        };
+    pub fn check_validity(&self) {
+        let mut seen = self.pool;
 
-        match &mut self.stage {
+        for p in &self.players {
+            if !self.pool.intersection(p.hand).is_empty() {
+                panic!("PLAYER HAD CARDS IN HAND THAT WERE SOME WHERE IN THE POOL");
+            }
+            if !seen.intersection(p.hand).is_empty() {
+                panic!("PLAYER HAD CARDS IN HAND THAT WERE SOME WHERE ELSE");
+            }
+            seen = p.hand.union(seen);
+
+            for r in p.books.iter() {
+                let rank = r.in_all_suits();
+                if !seen.intersection(rank).is_empty() {
+                    panic!("PLAYER HAD CARDS IN HAND THAT WERE SOME WHERE ELSE");
+                }
+                seen = rank.union(seen);
+            }
+        }
+
+        assert_eq!(seen, Cards::all());
+    }
+    pub fn step(&mut self) {
+        self.ctx.update(&self.players);
+
+        let prev_count = self.announcements.len();
+        self.step_inner();
+
+        for a in &self.announcements[prev_count..] {
+            for p in &mut self.players {
+                p.strategy.react(&self.ctx, *a);
+            }
+        }
+    }
+    fn check_books(&mut self, pid: PlayerId) {
+        let p = &mut self.players[pid.0 as usize];
+
+        let hand = p.hand;
+        let mut seen = Cards::empty();
+
+        let ranks = hand
+            .iter()
+            .map(|c| c.rank())
+            .fold(Ranks::empty(), |rs, r| rs | r.into());
+
+        for rank in ranks.iter() {
+            if rank.in_all_suits().intersection(hand) == rank.in_all_suits() {
+                p.hand = p.hand.remove(rank.in_all_suits());
+                for c in rank.in_all_suits().iter() {
+                    seen = seen.add(c);
+                }
+                self.announcements.push(Announcement::GotBook {
+                    player: pid,
+                    book: rank,
+                });
+                p.books |= rank.into();
+            }
+        }
+    }
+    fn step_inner(&mut self) {
+        match self.stage.clone() {
             GameStage::Dealing { who_next } => {
                 let p: &mut Player = &mut self.players[who_next.0 as usize];
 
                 if self.pool.num() == 0 || p.hand.num() == self.starting_cards {
-                    self.stage = GameStage::Playing {
-                        who_next: *who_next,
-                    };
+                    self.stage = GameStage::Playing { who_next };
+
+                    for i in 0..self.players.len() {
+                        assert_eq!(
+                            self.players[i].hand.num(),
+                            self.starting_cards,
+                            "Oh no! Player {} only has {} cards. There are {} left in the pool",
+                            i,
+                            self.players[i].hand.num(),
+                            self.pool.num()
+                        );
+
+                        self.check_books(PlayerId(i as _));
+                    }
                 } else {
                     let Some(c) = self.pool.choose_random() else {
-                        return;
+                        panic!("did not find any card");
                     };
-                    self.pool = self.pool.remove(c);
-                    p.deal_card(&mut ctx, c);
-                    *who_next = PlayerId((who_next.0 + 1) % self.players.len() as u32);
+                    self.pool = self.pool.remove_one(c);
+                    p.deal_card(&self.ctx, c);
+                    self.stage = GameStage::Dealing {
+                        who_next: PlayerId((who_next.0 + 1) % self.players.len() as u32),
+                    };
                 }
             }
             GameStage::Playing { who_next } => {
                 if self.players.iter().all(|p| p.hand.is_empty()) {
-                    self.stage = GameStage::Done {
-                        who_next: *who_next,
+                    self.stage = GameStage::Done { who_next };
+                    return;
+                }
+
+                if self.players.iter().filter(|p| !p.hand.is_empty()).count() == 1 {
+                    let (idx, p) = self
+                        .players
+                        .iter_mut()
+                        .enumerate()
+                        .find(|(_, p)| !p.hand.is_empty())
+                        .unwrap();
+                    p.hand = p.hand.union(self.pool);
+
+                    self.pool = Cards::empty();
+
+                    self.check_books(PlayerId(idx as _));
+
+                    return;
+                }
+
+                self.ctx.update(&self.players);
+                let p: &mut Player = &mut self.players[who_next.0 as usize];
+
+                if p.hand.is_empty() {
+                    self.stage = GameStage::Playing {
+                        who_next: PlayerId((who_next.0 + 1) % self.players.len() as u32),
                     };
                     return;
                 }
 
-                let p: &mut Player = &mut self.players[who_next.0 as usize];
-
-                if p.hand.is_empty() {
-                    *who_next = PlayerId((who_next.0 + 1) % self.players.len() as u32);
-                    return;
-                }
-
-                if let Some(action) = p.strategy.action(&mut ctx) {
-                    if *who_next == action.ask_who {
-                        info!("Whuups! Tried to ask self for card");
+                if let Some(action) = p.strategy.action(&self.ctx) {
+                    if who_next == action.ask_who {
+                        panic!("Tried to ask self for cards!");
                         return;
                     }
 
-                    let face = action.ask_for.in_all_suits();
+                    let rank = action.ask_for;
 
-                    if p.hand.intersection(face).is_empty() {
-                        info!("Asked for a card they didn't have!");
+                    if p.hand.intersection(rank.in_all_suits()).is_empty() {
+                        info!(
+                            "Asked for a card they didn't have! {:?} asked for {:?}",
+                            p, rank
+                        );
                         return;
                     }
 
+                    self.ctx.update(&self.players);
                     let asked: &mut Player = &mut self.players[action.ask_who.0 as usize];
-                    let announcement = if asked.hand.intersection(face).is_empty() {
+                    let response = if asked.hand.intersection(rank.in_all_suits()).is_empty() {
                         if let Some(drawn) = self.pool.choose_random() {
-                            self.pool = self.pool.remove(drawn);
+                            self.pool = self.pool.remove_one(drawn);
 
                             let p: &mut Player = &mut self.players[who_next.0 as usize];
-                            p.deal_card(&mut ctx, drawn);
-                            // self.players[self.who_next.0 as usize]
-                            //     .strategy
-                            //     .react(&mut ctx, Announcement::GoFish(drawn));
-                            Announcement {
-                                player_asking: *who_next,
-                                player_asked: action.ask_who,
-                                // asked_for: face,
-                                asked_for: Cards::empty().add(drawn),
-                                response: Response::GoFish,
-                            }
+                            p.deal_card(&self.ctx, drawn);
+
+                            self.check_validity();
+
+                            Response::GoFish
                         } else {
-                            Announcement {
-                                player_asking: *who_next,
-                                player_asked: action.ask_who,
-                                // asked_for: face,
-                                asked_for: Cards::empty().add(action.ask_for),
-                                response: Response::GoFish,
-                            }
+                            self.check_validity();
+
+                            Response::GoFish
                         }
                     } else {
-                        info!("THEY MATCHED!");
-
-                        let had = asked.hand.intersection(face);
+                        let had = asked.hand.intersection(rank.in_all_suits());
 
                         for c in had.iter() {
                             asked.take(c);
                         }
                         let p: &mut Player = &mut self.players[who_next.0 as usize];
                         for c in had.iter() {
-                            p.deal_card(&mut ctx, c);
+                            p.deal_card(&self.ctx, c);
                         }
 
-                        Announcement {
-                            player_asking: *who_next,
-                            player_asked: action.ask_who,
-                            // asked_for: face,
-                            asked_for: had,
-                            response: Response::GoFish,
-                        }
+                        Response::TakeThese { count: had.num() }
+                    };
+
+                    let announcement = Announcement::Action {
+                        player_asking: who_next,
+                        player_asked: action.ask_who,
+                        // asked_for: face,
+                        asked_for: rank,
+                        response,
                     };
 
                     self.announcements.push(announcement);
 
-                    *who_next = PlayerId((who_next.0 + 1) % self.players.len() as u32);
+                    self.stage = GameStage::Playing {
+                        who_next: PlayerId((who_next.0 + 1) % self.players.len() as u32),
+                    };
 
-                    for p in &mut self.players {
-                        let hand = p.hand;
-
-                        for c in hand.iter() {
-                            if c.in_all_suits().iter().all(|c| hand.has(c)) {
-                                for c in c.in_all_suits().iter() {
-                                    p.hand = p.hand.remove(c);
-                                }
-                                p.pairs.push(c.in_all_suits());
-                            }
-                        }
-                    }
-
-                    // info!("{action:?}");
+                    self.check_books(who_next);
                 } else {
                     info!("Player had no action...");
                 }
 
                 let p: &mut Player = &mut self.players[who_next.0 as usize];
                 if p.hand.is_empty() {
-                    *who_next = PlayerId((who_next.0 + 1) % self.players.len() as u32);
-                    return;
+                    self.stage = GameStage::Playing {
+                        who_next: PlayerId((who_next.0 + 1) % self.players.len() as u32),
+                    };
                 }
             }
             GameStage::Done { .. } => {}
         }
-
-        // let mut ctx = Context {
-        //     players: (0..self.players.len() as _).map(PlayerId).collect_vec(),
-        // };
-
-        // let p: &mut Player = &mut self.players[self.who_next.0 as usize];
-        // let action = p.strategy.action(&mut ctx);
-
-        // if self.who_next == action.ask_who {
-        //     panic!();
-        // }
-
-        // let asked: &mut Player = &mut self.players[self.who_next.0 as usize];
-        // if asked.hand.intersection(action.ask_for).is_empty() {
-        //     let drawn = self.pool.choose_random();
-        //     self.pool = self.pool.remove(drawn);
-        //     self.players[self.who_next.0 as usize]
-        //         .strategy
-        //         .react(&mut ctx, Announcement::GoFish(drawn));
-        // } else {
-        // }
-        // asked.
     }
 }

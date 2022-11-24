@@ -5,3 +5,6 @@
 body {
   @apply bg-slate-800 text-white grid place-items-center min-h-screen;
 }
+#root {
+  @apply w-full;
+}

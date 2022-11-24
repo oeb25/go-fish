@@ -1,2 +1,2 @@
 [workspace]
-members = ["fish-engine", "fish-wasm"]
+members = ["fish-engine"]

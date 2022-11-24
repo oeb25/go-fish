@@ -1,8 +1,15 @@
 mod utils;
 
-use fish_engine::{self, Announcement, Card, Cards, Game, GameStage, Player, Random};
+use fish_engine::{
+    self,
+    cards::{Card, Cards, Rank},
+    random_strat::Random,
+    strategy::{PlayerId, Response, Strat},
+    wiki_strat::Wiki,
+    Game, GameStage, Player,
+};
 
-use log::info;
+use typeshare::typeshare;
 use wasm_bindgen::prelude::*;
 
 // When the `wee_alloc` feature is enabled, use `wee_alloc` as the global
@@ -20,17 +27,17 @@ pub struct Engine {
 impl Engine {
     pub fn new() -> Engine {
         console_error_panic_hook::set_once();
-        console_log::init_with_level(log::Level::Debug);
+        let _ = console_log::init_with_level(log::Level::Debug);
 
-        let mut game = Game::new(
-            5,
-            vec![
-                Player::new(Box::new(Random::default())),
-                Player::new(Box::new(Random::default())),
-                Player::new(Box::new(Random::default())),
-                Player::new(Box::new(Random::default())),
-                Player::new(Box::new(Random::default())),
-                Player::new(Box::new(Random::default())),
+        let game = Game::new(
+            17,
+            [
+                Strat::wiki(),
+                Strat::random(),
+                Strat::random(),
+                // Player::new(Box::new(Random::default())),
+                // Player::new(Box::new(Random::default())),
+                // Player::new(Box::new(Random::default())),
             ],
         );
 
@@ -60,6 +67,44 @@ impl Engine {
         serde_json::to_string(&self.game).unwrap()
     }
 }
+
+impl Default for Engine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// #[typeshare]
+// pub struct GameState {
+//     pool: Cards,
+//     players: Vec<Player>,
+//     announcements: Vec<Announcement>,
+//     stage: GameStage,
+// }
+
+//   enum GameStage
+//     | { name: "Dealing"; who_next: number }
+//     | { name: "Playing"; who_next: number };
+
+// #[typeshare]
+// pub struct PlayerState {
+//     hand: Cards,
+//     books: Vec<Vec<Card>>,
+// }
+
+// #[typeshare]
+// struct Announcement {
+//     player_asking: PlayerId,
+//     player_asked: PlayerId,
+//     asked_for: Rank,
+//     response: Response,
+// }
+
+//   struct Response
+//     | {
+//         struct:";
+//       }
+//     | {: "TakeThese"; count: number };
 
 // #[wasm_bindgen]
 // pub fn greet() {
